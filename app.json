@@ -23,7 +23,22 @@
       "edgeToEdgeEnabled": true
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "output": "single",
+      "meta": {
+        "viewport": "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no",
+        "apple-mobile-web-app-capable": "yes",
+        "apple-mobile-web-app-status-bar-style": "default",
+        "apple-mobile-web-app-title": "Smart Shopping List",
+        "theme-color": "#6366f1"
+      },
+      "links": [
+        {
+          "rel": "manifest",
+          "href": "/manifest.json"
+        }
+      ]
     }
   }
 }
