@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Redirecting...</title>
+  <script>
+    // GitHub Pages SPA redirect
+    // This file handles client-side routing for Single Page Applications
+    sessionStorage.setItem('redirect', location.pathname + location.search);
+    location.replace('/');
+  </script>
+</head>
+<body>
+  <p>Redirecting to <a href="/">home page</a>...</p>
+</body>
+</html>
