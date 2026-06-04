@@ -1,5 +1,5 @@
-const CACHE_NAME = 'shoplist-v5';
-const RUNTIME_CACHE = 'shoplist-runtime-v4';
+const CACHE_NAME = 'shoplist-v6';
+const RUNTIME_CACHE = 'shoplist-runtime-v5';
 
 // Static assets to cache on install
 const STATIC_ASSETS = [
@@ -8,12 +8,11 @@ const STATIC_ASSETS = [
   '/manifest.json',
   '/icon-192.svg',
   '/icon-512.svg',
-  '/favicon.ico',
-  '/_expo/static/js/web/index-cf565eb42ee7e75299e1a275d2bd8677.js'
+  '/favicon.ico'
 ];
 
 // Dynamic cache for runtime requests
-const DYNAMIC_CACHE = 'shoplist-dynamic-v2';
+const DYNAMIC_CACHE = 'shoplist-dynamic-v3';
 
 // Install event - cache static assets
 self.addEventListener('install', (event) => {
@@ -49,8 +48,8 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Cache-First for static assets
-  if (isStaticAsset(event.request)) {
+  // Cache-First for static assets including Expo bundles
+  if (isStaticAsset(event.request) || isExpoBundle(event.request)) {
     event.respondWith(cacheFirst(event.request));
   } 
   // Network-First for dynamic content (if we had an API)
@@ -134,4 +133,9 @@ function isStaticAsset(request) {
 function isApiRequest(request) {
   const url = new URL(request.url);
   return url.pathname.startsWith('/api/');
+}
+
+function isExpoBundle(request) {
+  const url = new URL(request.url);
+  return url.pathname.includes('/_expo/static/js/web/index-');
 }
