@@ -8,7 +8,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "build:web": "npx expo export -p web --clear",
+    "build:web": "npx expo export -p web --clear && node fix-paths.js",
     "vercel-build": "npm run build:web",
     "predeploy": "cross-env EXPO_PUBLIC_BASE_URL=/Shoplist/ EXPO_PUBLIC_PUBLIC_URL=/Shoplist/ npm run build:web",
     "deploy": "gh-pages -d dist"
