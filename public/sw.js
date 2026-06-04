@@ -1,5 +1,5 @@
-const CACHE_NAME = 'shoplist-v6';
-const RUNTIME_CACHE = 'shoplist-runtime-v5';
+const CACHE_NAME = 'shoplist-v7';
+const RUNTIME_CACHE = 'shoplist-runtime-v6';
 
 // Static assets to cache on install
 const STATIC_ASSETS = [
@@ -12,7 +12,7 @@ const STATIC_ASSETS = [
 ];
 
 // Dynamic cache for runtime requests
-const DYNAMIC_CACHE = 'shoplist-dynamic-v3';
+const DYNAMIC_CACHE = 'shoplist-dynamic-v4';
 
 // Install event - cache static assets
 self.addEventListener('install', (event) => {
