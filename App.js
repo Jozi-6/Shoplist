@@ -72,16 +72,50 @@ export default function App() {
   const [renameListModalVisible, setRenameListModalVisible] = useState(false);
   const [renamingListId, setRenamingListId] = useState(null);
   const [renameListName, setRenameListName] = useState('');
+  const [isOnline, setIsOnline] = useState(true);
+  const [syncQueue, setSyncQueue] = useState([]);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Load lists from AsyncStorage on mount
   useEffect(() => {
     loadLists();
+    loadSyncQueue();
+    setupNetworkListeners();
   }, []);
 
   // Save lists to AsyncStorage whenever they change
   useEffect(() => {
     saveLists();
   }, [lists]);
+
+  // Save sync queue to AsyncStorage whenever it changes
+  useEffect(() => {
+    saveSyncQueue();
+  }, [syncQueue]);
+
+  // Setup network status listeners
+  const setupNetworkListeners = () => {
+    if (typeof window !== 'undefined') {
+      setIsOnline(navigator.onLine);
+      
+      const handleOnline = () => {
+        setIsOnline(true);
+        processSyncQueue();
+      };
+      
+      const handleOffline = () => {
+        setIsOnline(false);
+      };
+      
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+      
+      return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+      };
+    }
+  };
 
   const loadLists = async () => {
     try {
@@ -107,6 +141,57 @@ export default function App() {
     }
   };
 
+  const loadSyncQueue = async () => {
+    try {
+      const storedQueue = await AsyncStorage.getItem('syncQueue');
+      if (storedQueue) {
+        setSyncQueue(JSON.parse(storedQueue));
+      }
+    } catch (error) {
+      console.error('Error loading sync queue:', error);
+    }
+  };
+
+  const saveSyncQueue = async () => {
+    try {
+      await AsyncStorage.setItem('syncQueue', JSON.stringify(syncQueue));
+    } catch (error) {
+      console.error('Error saving sync queue:', error);
+    }
+  };
+
+  const addToSyncQueue = (mutation) => {
+    const queuedMutation = {
+      ...mutation,
+      timestamp: Date.now(),
+      id: `${mutation.type}-${Date.now()}`
+    };
+    setSyncQueue(prev => [...prev, queuedMutation]);
+  };
+
+  const processSyncQueue = async () => {
+    if (syncQueue.length === 0 || !isOnline || isSyncing) return;
+
+    setIsSyncing(true);
+    const sortedQueue = [...syncQueue].sort((a, b) => a.timestamp - b.timestamp);
+
+    for (const mutation of sortedQueue) {
+      try {
+        // Here you would sync with your backend API
+        // For now, we'll just log it since there's no backend
+        console.log('Syncing mutation:', mutation);
+        
+        // Remove from queue after successful sync
+        setSyncQueue(prev => prev.filter(m => m.id !== mutation.id));
+      } catch (error) {
+        console.error('Error syncing mutation:', mutation, error);
+        // Keep in queue for retry
+      }
+    }
+
+    setIsSyncing(false);
+  };
+
   const saveLists = async () => {
     try {
       await AsyncStorage.setItem('shoppingLists', JSON.stringify(lists));
@@ -130,6 +215,12 @@ export default function App() {
       setCurrentListId(newList.id);
       setNewListName('');
       setCreateListModalVisible(false);
+      
+      // Track mutation for sync
+      addToSyncQueue({
+        type: 'CREATE_LIST',
+        data: newList
+      });
     }
   };
 
@@ -143,6 +234,7 @@ export default function App() {
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
+            const listToDelete = lists.find(list => list.id === listId);
             const updatedLists = lists.filter(list => list.id !== listId);
             
             if (updatedLists.length === 0) {
@@ -160,6 +252,14 @@ export default function App() {
                 setCurrentListId(updatedLists[0].id);
               }
             }
+            
+            // Track mutation for sync
+            if (listToDelete) {
+              addToSyncQueue({
+                type: 'DELETE_LIST',
+                data: { listId, list: listToDelete }
+              });
+            }
           }
         }
       ]
@@ -168,6 +268,7 @@ export default function App() {
 
   const renameList = () => {
     if (renameListName.trim() && renamingListId) {
+      const oldName = lists.find(list => list.id === renamingListId)?.name;
       setLists(lists.map(list =>
         list.id === renamingListId
           ? { ...list, name: renameListName.trim() }
@@ -176,6 +277,12 @@ export default function App() {
       setRenameListName('');
       setRenamingListId(null);
       setRenameListModalVisible(false);
+      
+      // Track mutation for sync
+      addToSyncQueue({
+        type: 'RENAME_LIST',
+        data: { listId: renamingListId, oldName, newName: renameListName.trim() }
+      });
     }
   };
 
@@ -237,12 +344,20 @@ export default function App() {
             ? { ...list, items: [...list.items, newItem] }
             : list
         ));
+        
+        // Track mutation for sync
+        addToSyncQueue({
+          type: 'ADD_ITEM',
+          data: { listId: currentListId, item: newItem }
+        });
       }
       setInputText('');
     }
   };
 
   const toggleItem = (id) => {
+    const currentList = getCurrentList();
+    const item = currentList?.items.find(i => i.id === id);
     setLists(lists.map(list =>
       list.id === currentListId
         ? { ...list, items: list.items.map(item => 
@@ -250,14 +365,32 @@ export default function App() {
           )}
         : list
     ));
+    
+    // Track mutation for sync
+    if (item) {
+      addToSyncQueue({
+        type: 'TOGGLE_ITEM',
+        data: { listId: currentListId, itemId: id, completed: !item.completed }
+      });
+    }
   };
 
   const deleteItem = (id) => {
+    const currentList = getCurrentList();
+    const item = currentList?.items.find(i => i.id === id);
     setLists(lists.map(list =>
       list.id === currentListId
         ? { ...list, items: list.items.filter(item => item.id !== id) }
         : list
     ));
+    
+    // Track mutation for sync
+    if (item) {
+      addToSyncQueue({
+        type: 'DELETE_ITEM',
+        data: { listId: currentListId, itemId: id, item }
+      });
+    }
   };
 
   const toggleEdit = (id) => {
@@ -271,6 +404,11 @@ export default function App() {
   };
 
   const saveEdit = (id) => {
+    const currentList = getCurrentList();
+    const item = currentList?.items.find(i => i.id === id);
+    const oldText = item?.text;
+    const newText = item?.editName;
+    
     setLists(lists.map(list =>
       list.id === currentListId
         ? { ...list, items: list.items.map(item => 
@@ -278,6 +416,14 @@ export default function App() {
           )}
         : list
     ));
+    
+    // Track mutation for sync
+    if (oldText !== newText) {
+      addToSyncQueue({
+        type: 'UPDATE_ITEM',
+        data: { listId: currentListId, itemId: id, field: 'text', value: newText }
+      });
+    }
   };
 
   const updateEditName = (id, newName) => {
@@ -298,6 +444,12 @@ export default function App() {
           )}
         : list
     ));
+    
+    // Track mutation for sync
+    addToSyncQueue({
+      type: 'UPDATE_ITEM',
+      data: { listId: currentListId, itemId: id, field: 'price', value: newPrice }
+    });
   };
 
   const togglePriceEdit = (id) => {
@@ -305,11 +457,22 @@ export default function App() {
   };
 
   const clearCompleted = () => {
+    const currentList = getCurrentList();
+    const completedItems = currentList?.items.filter(item => item.completed) || [];
+    
     setLists(lists.map(list =>
       list.id === currentListId
         ? { ...list, items: list.items.filter(item => !item.completed) }
         : list
     ));
+    
+    // Track mutation for sync
+    completedItems.forEach(item => {
+      addToSyncQueue({
+        type: 'DELETE_ITEM',
+        data: { listId: currentListId, itemId: item.id, item }
+      });
+    });
   };
 
   const openEditModal = (item) => {
@@ -321,6 +484,10 @@ export default function App() {
   };
 
   const saveItemDetails = () => {
+    const oldQuantity = editingItem?.quantity || '';
+    const oldNotes = editingItem?.notes || '';
+    const oldPrice = editingItem?.price || '';
+    
     setLists(lists.map(list =>
       list.id === currentListId
         ? { ...list, items: list.items.map(item => 
@@ -330,6 +497,27 @@ export default function App() {
           )}
         : list
     ));
+    
+    // Track mutations for sync
+    if (quantity.trim() !== oldQuantity) {
+      addToSyncQueue({
+        type: 'UPDATE_ITEM',
+        data: { listId: currentListId, itemId: editingItem.id, field: 'quantity', value: quantity.trim() }
+      });
+    }
+    if (notes.trim() !== oldNotes) {
+      addToSyncQueue({
+        type: 'UPDATE_ITEM',
+        data: { listId: currentListId, itemId: editingItem.id, field: 'notes', value: notes.trim() }
+      });
+    }
+    if (price.trim() !== oldPrice) {
+      addToSyncQueue({
+        type: 'UPDATE_ITEM',
+        data: { listId: currentListId, itemId: editingItem.id, field: 'price', value: price.trim() }
+      });
+    }
+    
     setModalVisible(false);
     setEditingItem(null);
     setQuantity('');
@@ -457,6 +645,16 @@ export default function App() {
         )}
       </View>
 
+      {/* Network Status Indicator */}
+      <View style={[styles.networkStatus, isOnline ? styles.online : styles.offline]}>
+        <Text style={styles.networkStatusText}>
+          {isSyncing ? 'Syncing...' : isOnline ? '✓ Online' : '⚠ Offline'}
+        </Text>
+        {!isOnline && syncQueue.length > 0 && (
+          <Text style={styles.queueCount}>{syncQueue.length} pending</Text>
+        )}
+      </View>
+
       {/* List Management Section */}
       <View style={styles.listManagement}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.listTabs}>
@@ -476,10 +674,7 @@ export default function App() {
               </Text>
               <TouchableOpacity
                 style={styles.deleteListButton}
-                onPress={(e) => {
-                  e?.stopPropagation?.();
-                  deleteList(list.id);
-                }}
+                onPress={() => deleteList(list.id)}
                 hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
               >
                 <Text style={styles.deleteListButtonText}>✕</Text>
@@ -725,6 +920,33 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  networkStatus: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#f3f4f6',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e5e5',
+  },
+  online: {
+    backgroundColor: '#d1fae5',
+  },
+  offline: {
+    backgroundColor: '#fee2e2',
+  },
+  networkStatusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  queueCount: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#6b7280',
+    marginLeft: 8,
   },
   listManagement: {
     backgroundColor: '#fff',
