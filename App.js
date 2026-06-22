@@ -3,59 +3,6 @@ import { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, FlatList, ScrollView, Modal, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Register service worker for PWA
-if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
-      .then((registration) => {
-        console.log('Service Worker registered with scope:', registration.scope);
-      })
-      .catch((error) => {
-        console.log('Service Worker registration failed:', error);
-      });
-  });
-}
-
-// Auto-categorization mapping
-const CATEGORY_MAP = {
-  'Produce': ['apple', 'banana', 'orange', 'grape', 'strawberry', 'blueberry', 'carrot', 'broccoli', 'lettuce', 'tomato', 'potato', 'onion', 'garlic', 'pepper', 'cucumber', 'celery', 'spinach', 'kale', 'mushroom', 'avocado'],
-  'Dairy': ['milk', 'cheese', 'yogurt', 'butter', 'cream', 'eggs', 'sour cream', 'cottage cheese', 'ice cream'],
-  'Meat': ['chicken', 'beef', 'pork', 'fish', 'salmon', 'turkey', 'bacon', 'sausage', 'ham', 'steak', 'ground beef', 'shrimp', 'lamb'],
-  'Bakery': ['bread', 'bagel', 'muffin', 'cake', 'cookie', 'croissant', 'roll', 'tortilla', 'pasta', 'rice'],
-  'Frozen': ['frozen pizza', 'ice cream', 'frozen vegetables', 'frozen fruit', 'waffles', 'frozen dinner'],
-  'Pantry': ['cereal', 'pasta', 'rice', 'canned beans', 'canned tomatoes', 'oil', 'flour', 'sugar', 'salt', 'pepper', 'spices', 'sauce', 'soup'],
-  'Beverages': ['water', 'juice', 'soda', 'coffee', 'tea', 'milk', 'beer', 'wine'],
-  'Snacks': ['chips', 'crackers', 'nuts', 'cookies', 'candy', 'popcorn', 'granola bar'],
-  'Household': ['paper towels', 'toilet paper', 'soap', 'detergent', 'cleaner', 'trash bags', 'sponges'],
-  'Other': []
-};
-
-const CATEGORY_COLORS = {
-  'Produce': '#10b981',
-  'Dairy': '#3b82f6',
-  'Meat': '#ef4444',
-  'Bakery': '#f59e0b',
-  'Frozen': '#06b6d4',
-  'Pantry': '#8b5cf6',
-  'Beverages': '#ec4899',
-  'Snacks': '#f97316',
-  'Household': '#6b7280',
-  'Other': '#9ca3af'
-};
-
-const autoCategorize = (itemName) => {
-  const lowerName = itemName.toLowerCase();
-  for (const [category, items] of Object.entries(CATEGORY_MAP)) {
-    if (category === 'Other') continue;
-    for (const item of items) {
-      if (lowerName.includes(item)) {
-        return category;
-      }
-    }
-  }
-  return 'Other';
-};
-
 export default function App() {
   const [lists, setLists] = useState([]);
   const [currentListId, setCurrentListId] = useState(null);
@@ -72,15 +19,13 @@ export default function App() {
   const [renameListModalVisible, setRenameListModalVisible] = useState(false);
   const [renamingListId, setRenamingListId] = useState(null);
   const [renameListName, setRenameListName] = useState('');
-  const [isOnline, setIsOnline] = useState(true);
-  const [syncQueue, setSyncQueue] = useState([]);
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [currentView, setCurrentView] = useState('active'); // 'active' or 'history'
+  const [history, setHistory] = useState([]);
 
-  // Load lists from AsyncStorage on mount
+  // Load lists and history from AsyncStorage on mount
   useEffect(() => {
     loadLists();
-    loadSyncQueue();
-    setupNetworkListeners();
+    loadHistory();
   }, []);
 
   // Save lists to AsyncStorage whenever they change
@@ -88,34 +33,10 @@ export default function App() {
     saveLists();
   }, [lists]);
 
-  // Save sync queue to AsyncStorage whenever it changes
+  // Save history to AsyncStorage whenever it changes
   useEffect(() => {
-    saveSyncQueue();
-  }, [syncQueue]);
-
-  // Setup network status listeners
-  const setupNetworkListeners = () => {
-    if (typeof window !== 'undefined') {
-      setIsOnline(navigator.onLine);
-      
-      const handleOnline = () => {
-        setIsOnline(true);
-        processSyncQueue();
-      };
-      
-      const handleOffline = () => {
-        setIsOnline(false);
-      };
-      
-      window.addEventListener('online', handleOnline);
-      window.addEventListener('offline', handleOffline);
-      
-      return () => {
-        window.removeEventListener('online', handleOnline);
-        window.removeEventListener('offline', handleOffline);
-      };
-    }
-  };
+    saveHistory();
+  }, [history]);
 
   const loadLists = async () => {
     try {
@@ -141,55 +62,39 @@ export default function App() {
     }
   };
 
-  const loadSyncQueue = async () => {
+  const loadHistory = async () => {
     try {
-      const storedQueue = await AsyncStorage.getItem('syncQueue');
-      if (storedQueue) {
-        setSyncQueue(JSON.parse(storedQueue));
+      const storedHistory = await AsyncStorage.getItem('shoppingHistory');
+      if (storedHistory) {
+        setHistory(JSON.parse(storedHistory));
       }
     } catch (error) {
-      console.error('Error loading sync queue:', error);
+      console.error('Error loading history:', error);
     }
   };
 
-  const saveSyncQueue = async () => {
+  const saveHistory = async () => {
     try {
-      await AsyncStorage.setItem('syncQueue', JSON.stringify(syncQueue));
+      await AsyncStorage.setItem('shoppingHistory', JSON.stringify(history));
     } catch (error) {
-      console.error('Error saving sync queue:', error);
+      console.error('Error saving history:', error);
     }
   };
 
-  const addToSyncQueue = (mutation) => {
-    const queuedMutation = {
-      ...mutation,
-      timestamp: Date.now(),
-      id: `${mutation.type}-${Date.now()}`
+  const addToHistory = (list) => {
+    const historyEntry = {
+      id: Date.now().toString(),
+      listName: list.name,
+      items: [...list.items],
+      archivedAt: new Date().toISOString(),
+      total: list.items.reduce((sum, item) => {
+        if (item.completed) {
+          return sum + (parseFloat(item.price) || 0);
+        }
+        return sum;
+      }, 0)
     };
-    setSyncQueue(prev => [...prev, queuedMutation]);
-  };
-
-  const processSyncQueue = async () => {
-    if (syncQueue.length === 0 || !isOnline || isSyncing) return;
-
-    setIsSyncing(true);
-    const sortedQueue = [...syncQueue].sort((a, b) => a.timestamp - b.timestamp);
-
-    for (const mutation of sortedQueue) {
-      try {
-        // Here you would sync with your backend API
-        // For now, we'll just log it since there's no backend
-        console.log('Syncing mutation:', mutation);
-        
-        // Remove from queue after successful sync
-        setSyncQueue(prev => prev.filter(m => m.id !== mutation.id));
-      } catch (error) {
-        console.error('Error syncing mutation:', mutation, error);
-        // Keep in queue for retry
-      }
-    }
-
-    setIsSyncing(false);
+    setHistory(prev => [historyEntry, ...prev]);
   };
 
   const saveLists = async () => {
@@ -215,12 +120,6 @@ export default function App() {
       setCurrentListId(newList.id);
       setNewListName('');
       setCreateListModalVisible(false);
-      
-      // Track mutation for sync
-      addToSyncQueue({
-        type: 'CREATE_LIST',
-        data: newList
-      });
     }
   };
 
@@ -252,14 +151,6 @@ export default function App() {
                 setCurrentListId(updatedLists[0].id);
               }
             }
-            
-            // Track mutation for sync
-            if (listToDelete) {
-              addToSyncQueue({
-                type: 'DELETE_LIST',
-                data: { listId, list: listToDelete }
-              });
-            }
           }
         }
       ]
@@ -268,7 +159,6 @@ export default function App() {
 
   const renameList = () => {
     if (renameListName.trim() && renamingListId) {
-      const oldName = lists.find(list => list.id === renamingListId)?.name;
       setLists(lists.map(list =>
         list.id === renamingListId
           ? { ...list, name: renameListName.trim() }
@@ -277,12 +167,6 @@ export default function App() {
       setRenameListName('');
       setRenamingListId(null);
       setRenameListModalVisible(false);
-      
-      // Track mutation for sync
-      addToSyncQueue({
-        type: 'RENAME_LIST',
-        data: { listId: renamingListId, oldName, newName: renameListName.trim() }
-      });
     }
   };
 
@@ -325,14 +209,12 @@ export default function App() {
 
   const addItem = () => {
     if (inputText.trim()) {
-      const category = autoCategorize(inputText);
       const currentList = getCurrentList();
       if (currentList) {
         const newItem = { 
           id: Date.now().toString(), 
           text: inputText.trim(), 
           completed: false,
-          category,
           quantity: '',
           notes: '',
           price: '',
@@ -344,20 +226,12 @@ export default function App() {
             ? { ...list, items: [...list.items, newItem] }
             : list
         ));
-        
-        // Track mutation for sync
-        addToSyncQueue({
-          type: 'ADD_ITEM',
-          data: { listId: currentListId, item: newItem }
-        });
       }
       setInputText('');
     }
   };
 
   const toggleItem = (id) => {
-    const currentList = getCurrentList();
-    const item = currentList?.items.find(i => i.id === id);
     setLists(lists.map(list =>
       list.id === currentListId
         ? { ...list, items: list.items.map(item => 
@@ -365,32 +239,14 @@ export default function App() {
           )}
         : list
     ));
-    
-    // Track mutation for sync
-    if (item) {
-      addToSyncQueue({
-        type: 'TOGGLE_ITEM',
-        data: { listId: currentListId, itemId: id, completed: !item.completed }
-      });
-    }
   };
 
   const deleteItem = (id) => {
-    const currentList = getCurrentList();
-    const item = currentList?.items.find(i => i.id === id);
     setLists(lists.map(list =>
       list.id === currentListId
         ? { ...list, items: list.items.filter(item => item.id !== id) }
         : list
     ));
-    
-    // Track mutation for sync
-    if (item) {
-      addToSyncQueue({
-        type: 'DELETE_ITEM',
-        data: { listId: currentListId, itemId: id, item }
-      });
-    }
   };
 
   const toggleEdit = (id) => {
@@ -404,11 +260,6 @@ export default function App() {
   };
 
   const saveEdit = (id) => {
-    const currentList = getCurrentList();
-    const item = currentList?.items.find(i => i.id === id);
-    const oldText = item?.text;
-    const newText = item?.editName;
-    
     setLists(lists.map(list =>
       list.id === currentListId
         ? { ...list, items: list.items.map(item => 
@@ -416,14 +267,6 @@ export default function App() {
           )}
         : list
     ));
-    
-    // Track mutation for sync
-    if (oldText !== newText) {
-      addToSyncQueue({
-        type: 'UPDATE_ITEM',
-        data: { listId: currentListId, itemId: id, field: 'text', value: newText }
-      });
-    }
   };
 
   const updateEditName = (id, newName) => {
@@ -444,12 +287,6 @@ export default function App() {
           )}
         : list
     ));
-    
-    // Track mutation for sync
-    addToSyncQueue({
-      type: 'UPDATE_ITEM',
-      data: { listId: currentListId, itemId: id, field: 'price', value: newPrice }
-    });
   };
 
   const togglePriceEdit = (id) => {
@@ -460,19 +297,16 @@ export default function App() {
     const currentList = getCurrentList();
     const completedItems = currentList?.items.filter(item => item.completed) || [];
     
+    // Add to history before clearing
+    if (currentList && completedItems.length > 0) {
+      addToHistory(currentList);
+    }
+    
     setLists(lists.map(list =>
       list.id === currentListId
         ? { ...list, items: list.items.filter(item => !item.completed) }
         : list
     ));
-    
-    // Track mutation for sync
-    completedItems.forEach(item => {
-      addToSyncQueue({
-        type: 'DELETE_ITEM',
-        data: { listId: currentListId, itemId: item.id, item }
-      });
-    });
   };
 
   const openEditModal = (item) => {
@@ -484,10 +318,6 @@ export default function App() {
   };
 
   const saveItemDetails = () => {
-    const oldQuantity = editingItem?.quantity || '';
-    const oldNotes = editingItem?.notes || '';
-    const oldPrice = editingItem?.price || '';
-    
     setLists(lists.map(list =>
       list.id === currentListId
         ? { ...list, items: list.items.map(item => 
@@ -497,26 +327,6 @@ export default function App() {
           )}
         : list
     ));
-    
-    // Track mutations for sync
-    if (quantity.trim() !== oldQuantity) {
-      addToSyncQueue({
-        type: 'UPDATE_ITEM',
-        data: { listId: currentListId, itemId: editingItem.id, field: 'quantity', value: quantity.trim() }
-      });
-    }
-    if (notes.trim() !== oldNotes) {
-      addToSyncQueue({
-        type: 'UPDATE_ITEM',
-        data: { listId: currentListId, itemId: editingItem.id, field: 'notes', value: notes.trim() }
-      });
-    }
-    if (price.trim() !== oldPrice) {
-      addToSyncQueue({
-        type: 'UPDATE_ITEM',
-        data: { listId: currentListId, itemId: editingItem.id, field: 'price', value: price.trim() }
-      });
-    }
     
     setModalVisible(false);
     setEditingItem(null);
@@ -574,7 +384,7 @@ export default function App() {
           {editingPriceId === item.id ? (
             <TextInput
               style={styles.priceInput}
-              placeholder="$0.00"
+              placeholder="0.00"
               value={item.price}
               onChangeText={(text) => updatePrice(item.id, text)}
               keyboardType="decimal-pad"
@@ -585,13 +395,10 @@ export default function App() {
           ) : (
             <TouchableOpacity onPress={() => togglePriceEdit(item.id)}>
               <Text style={styles.priceDisplay}>
-                {item.price ? `$${item.price}` : '$0.00'}
+                {item.price || '0.00'}
               </Text>
             </TouchableOpacity>
           )}
-        </View>
-        <View style={[styles.categoryBadge, { backgroundColor: CATEGORY_COLORS[item.category] }]}>
-          <Text style={styles.categoryText}>{item.category}</Text>
         </View>
       </TouchableOpacity>
       <TouchableOpacity 
@@ -603,22 +410,16 @@ export default function App() {
     </View>
   );
 
-  const groupItemsByCategory = (itemsToGroup) => {
-    const grouped = {};
-    itemsToGroup.forEach(item => {
-      if (!grouped[item.category]) {
-        grouped[item.category] = [];
-      }
-      grouped[item.category].push(item);
-    });
-    return grouped;
-  };
-
   const currentList = getCurrentList();
   const currentItems = currentList ? currentList.items : [];
-  const activeItems = currentItems.filter(item => !item.completed);
+  
+  // Sort items: unchecked items first, then checked items
+  const sortedItems = [...currentItems].sort((a, b) => {
+    if (a.completed === b.completed) return 0;
+    return a.completed ? 1 : -1;
+  });
+  
   const completedItems = currentItems.filter(item => item.completed);
-  const groupedActiveItems = groupItemsByCategory(activeItems);
 
   const calculateTotal = (itemsToCalculate) => {
     return itemsToCalculate.reduce((total, item) => {
@@ -627,122 +428,141 @@ export default function App() {
     }, 0);
   };
 
-  const activeTotal = calculateTotal(activeItems);
   const completedTotal = calculateTotal(completedItems);
-  const grandTotal = calculateTotal(currentItems);
 
   return (
     <View style={styles.container}>
       <StatusBar style="auto" />
       
       <View style={styles.header}>
-        <Text style={styles.title}>Smart Shopping List</Text>
-        {currentItems.length > 0 && (
+        <View style={styles.headerContent}>
+          <View style={styles.logoContainer}>
+            <Text style={styles.logoIcon}>📝</Text>
+          </View>
+          <Text style={styles.title}>Shopping List</Text>
+        </View>
+        {completedItems.length > 0 && (
           <View style={styles.headerTotal}>
             <Text style={styles.headerTotalLabel}>Total:</Text>
-            <Text style={styles.headerTotalValue}>${grandTotal.toFixed(2)}</Text>
+            <Text style={styles.headerTotalValue}>{completedTotal.toFixed(2)}</Text>
           </View>
         )}
       </View>
 
-      {/* Network Status Indicator */}
-      <View style={[styles.networkStatus, isOnline ? styles.online : styles.offline]}>
-        <Text style={styles.networkStatusText}>
-          {isSyncing ? 'Syncing...' : isOnline ? '✓ Online' : '⚠ Offline'}
-        </Text>
-        {!isOnline && syncQueue.length > 0 && (
-          <Text style={styles.queueCount}>{syncQueue.length} pending</Text>
-        )}
-      </View>
-
-      {/* List Management Section */}
-      <View style={styles.listManagement}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.listTabs}>
-          {lists.map(list => (
-            <TouchableOpacity
-              key={list.id}
-              style={[styles.listTab, list.id === currentListId && styles.listTabActive]}
-              onPress={() => switchList(list.id)}
-              onLongPress={() => {
-                setRenamingListId(list.id);
-                setRenameListName(list.name);
-                setRenameListModalVisible(true);
-              }}
-            >
-              <Text style={[styles.listTabText, list.id === currentListId && styles.listTabTextActive]}>
-                {list.name}
-              </Text>
-              <TouchableOpacity
-                style={styles.deleteListButton}
-                onPress={() => deleteList(list.id)}
-                hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
-              >
-                <Text style={styles.deleteListButtonText}>✕</Text>
-              </TouchableOpacity>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+      {/* Navigation Tabs */}
+      <View style={styles.navigationTabs}>
         <TouchableOpacity
-          style={styles.createListButton}
-          onPress={() => setCreateListModalVisible(true)}
+          style={[styles.navTab, currentView === 'active' && styles.navTabActive]}
+          onPress={() => setCurrentView('active')}
         >
-          <Text style={styles.createListButtonText}>+ New List</Text>
+          <Text style={[styles.navTabText, currentView === 'active' && styles.navTabTextActive]}>
+            Active Lists
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.navTab, currentView === 'history' && styles.navTabActive]}
+          onPress={() => setCurrentView('history')}
+        >
+          <Text style={[styles.navTabText, currentView === 'history' && styles.navTabTextActive]}>
+            History
+          </Text>
         </TouchableOpacity>
       </View>
 
-      <View style={styles.inputContainer}>
-        <TextInput
-          style={styles.input}
-          placeholder="Add an item..."
-          value={inputText}
-          onChangeText={setInputText}
-          onSubmitEditing={addItem}
-        />
-        <TouchableOpacity 
-          style={[styles.voiceButton, isListening && styles.voiceButtonActive]} 
-          onPress={startVoiceInput}
-        >
-          <Text style={styles.voiceButtonText}>{isListening ? '🎤' : '🎤'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.addButton} onPress={addItem}>
-          <Text style={styles.addButtonText}>Add</Text>
-        </TouchableOpacity>
-      </View>
+      {/* List Management Section - Only show in active view */}
+      {currentView === 'active' && (
+        <>
+          <View style={styles.listManagement}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.listTabs}>
+              {lists.map(list => (
+                <TouchableOpacity
+                  key={list.id}
+                  style={[styles.listTab, list.id === currentListId && styles.listTabActive]}
+                  onPress={() => switchList(list.id)}
+                  onLongPress={() => {
+                    setRenamingListId(list.id);
+                    setRenameListName(list.name);
+                    setRenameListModalVisible(true);
+                  }}
+                >
+                  <Text style={[styles.listTabText, list.id === currentListId && styles.listTabTextActive]}>
+                    {list.name}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.deleteListButton}
+                    onPress={() => deleteList(list.id)}
+                    hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
+                  >
+                    <Text style={styles.deleteListButtonText}>✕</Text>
+                  </TouchableOpacity>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.createListButton}
+              onPress={() => setCreateListModalVisible(true)}
+            >
+              <Text style={styles.createListButtonText}>+ New List</Text>
+            </TouchableOpacity>
+          </View>
 
-      <ScrollView style={styles.listContainer}>
-        {Object.keys(groupedActiveItems).length === 0 && completedItems.length === 0 ? (
-          <Text style={styles.emptyText}>Your shopping list is empty</Text>
-        ) : (
-          <>
-            {Object.entries(groupedActiveItems).map(([category, categoryItems]) => (
-              <View key={category} style={styles.categorySection}>
-                <View style={[styles.categoryHeader, { backgroundColor: CATEGORY_COLORS[category] }]}>
-                  <Text style={styles.categoryHeaderText}>{category}</Text>
-                </View>
-                {categoryItems.map(item => (
-                  <View key={item.id}>{renderItem({ item })}</View>
-                ))}
-              </View>
-            ))}
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={styles.input}
+              placeholder="Add an item..."
+              value={inputText}
+              onChangeText={setInputText}
+              onSubmitEditing={addItem}
+            />
+            <TouchableOpacity 
+              style={[styles.voiceButton, isListening && styles.voiceButtonActive]} 
+              onPress={startVoiceInput}
+            >
+              <Text style={styles.voiceButtonText}>{isListening ? '🎤' : '🎤'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.addButton} onPress={addItem}>
+              <Text style={styles.addButtonText}>Add</Text>
+            </TouchableOpacity>
+          </View>
 
-            {completedItems.length > 0 && (
-              <View style={styles.completedSection}>
-                <View style={styles.completedHeader}>
-                  <Text style={styles.completedHeaderText}>Completed</Text>
-                </View>
-                {completedItems.map(item => (
-                  <View key={item.id}>{renderItem({ item })}</View>
-                ))}
-              </View>
+          <ScrollView style={styles.listContainer}>
+            {sortedItems.length === 0 ? (
+              <Text style={styles.emptyText}>Your shopping list is empty</Text>
+            ) : (
+              sortedItems.map(item => (
+                <View key={item.id}>{renderItem({ item })}</View>
+              ))
             )}
-          </>
-        )}
-      </ScrollView>
+          </ScrollView>
 
-      {completedItems.length > 0 && (
-        <TouchableOpacity style={styles.clearButton} onPress={clearCompleted}>
-          <Text style={styles.clearButtonText}>Clear Completed Items</Text>
-        </TouchableOpacity>
+          {completedItems.length > 0 && (
+            <TouchableOpacity style={styles.clearButton} onPress={clearCompleted}>
+              <Text style={styles.clearButtonText}>Clear Completed Items</Text>
+            </TouchableOpacity>
+          )}
+        </>
+      )}
+
+      {/* History View */}
+      {currentView === 'history' && (
+        <ScrollView style={styles.listContainer}>
+          {history.length === 0 ? (
+            <Text style={styles.emptyText}>No history yet</Text>
+          ) : (
+            history.map(entry => (
+              <View key={entry.id} style={styles.historyItem}>
+                <View style={styles.historyHeader}>
+                  <Text style={styles.historyListName}>{entry.listName}</Text>
+                  <Text style={styles.historyTotal}>Total: {entry.total.toFixed(2)}</Text>
+                </View>
+                <Text style={styles.historyDate}>
+                  {new Date(entry.archivedAt).toLocaleDateString()} {new Date(entry.archivedAt).toLocaleTimeString()}
+                </Text>
+                <Text style={styles.historyItemCount}>{entry.items.length} items</Text>
+              </View>
+            ))
+          )}
+        </ScrollView>
       )}
 
       {/* Create List Modal */}
@@ -891,69 +711,76 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: '#6366f1',
-    padding: 20,
-    paddingTop: 60,
+    padding: 16,
+    paddingTop: 50,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  logoContainer: {
+    marginRight: 10,
+  },
+  logoIcon: {
+    fontSize: 28,
   },
   title: {
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: 'bold',
     color: '#fff',
-    textAlign: 'center',
-    marginBottom: 10,
   },
   headerTotal: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     borderRadius: 8,
   },
   headerTotalLabel: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: '#fff',
-    marginRight: 8,
+    marginRight: 6,
   },
   headerTotalValue: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#fff',
   },
-  networkStatus: {
+  navigationTabs: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e5e5',
   },
-  online: {
-    backgroundColor: '#d1fae5',
+  navTab: {
+    flex: 1,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
-  offline: {
-    backgroundColor: '#fee2e2',
+  navTabActive: {
+    borderBottomColor: '#6366f1',
   },
-  networkStatusText: {
-    fontSize: 12,
+  navTabText: {
+    fontSize: 15,
     fontWeight: '600',
-    color: '#374151',
-  },
-  queueCount: {
-    fontSize: 10,
-    fontWeight: '500',
     color: '#6b7280',
-    marginLeft: 8,
+  },
+  navTabTextActive: {
+    color: '#6366f1',
   },
   listManagement: {
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e5e5',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
   listTabs: {
     flexDirection: 'row',
@@ -963,10 +790,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#f3f4f6',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginRight: 6,
     borderWidth: 1,
     borderColor: '#e5e7eb',
   },
@@ -975,10 +802,10 @@ const styles = StyleSheet.create({
     borderColor: '#6366f1',
   },
   listTabText: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#374151',
     fontWeight: '500',
-    marginRight: 8,
+    marginRight: 6,
   },
   listTabTextActive: {
     color: '#fff',
@@ -987,9 +814,10 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+    backgroundColor: 'rgba(0, 0, 0, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
+    marginLeft: 6,
   },
   deleteListButtonText: {
     color: '#6b7280',
@@ -998,103 +826,73 @@ const styles = StyleSheet.create({
   },
   createListButton: {
     backgroundColor: '#10b981',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
     alignSelf: 'flex-start',
   },
   createListButtonText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
   },
   inputContainer: {
     flexDirection: 'row',
-    padding: 20,
+    padding: 12,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e5e5e5',
   },
   input: {
     flex: 1,
-    height: 50,
+    height: 44,
     borderWidth: 1,
     borderColor: '#d1d5db',
-    borderRadius: 8,
-    paddingHorizontal: 15,
-    fontSize: 16,
-    marginRight: 10,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    fontSize: 15,
+    marginRight: 8,
     backgroundColor: '#fff',
   },
   voiceButton: {
     backgroundColor: '#e5e7eb',
-    width: 50,
-    height: 50,
-    borderRadius: 8,
+    width: 44,
+    height: 44,
+    borderRadius: 6,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
+    marginRight: 8,
   },
   voiceButtonActive: {
     backgroundColor: '#ef4444',
   },
   voiceButtonText: {
-    fontSize: 20,
+    fontSize: 18,
   },
   addButton: {
     backgroundColor: '#6366f1',
-    paddingHorizontal: 20,
-    borderRadius: 8,
+    paddingHorizontal: 16,
+    borderRadius: 6,
     justifyContent: 'center',
-    height: 50,
-    minWidth: 80,
+    height: 44,
+    minWidth: 70,
   },
   addButtonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     textAlign: 'center',
   },
   listContainer: {
     flex: 1,
-    padding: 20,
-  },
-  categorySection: {
-    marginBottom: 20,
-  },
-  categoryHeader: {
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 10,
-  },
-  categoryHeaderText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  completedSection: {
-    marginTop: 20,
-    paddingTop: 20,
-    borderTopWidth: 2,
-    borderTopColor: '#e5e5e5',
-  },
-  completedHeader: {
-    padding: 12,
-    backgroundColor: '#9ca3af',
-    borderRadius: 8,
-    marginBottom: 10,
-  },
-  completedHeaderText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+    padding: 16,
   },
   itemContainer: {
     flexDirection: 'row',
     backgroundColor: '#fff',
-    padding: 15,
+    padding: 12,
     borderRadius: 8,
-    marginBottom: 10,
+    marginBottom: 8,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
@@ -1109,7 +907,7 @@ const styles = StyleSheet.create({
   },
   itemDetails: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 10,
   },
   editContainer: {
     flexDirection: 'row',
@@ -1123,51 +921,51 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    fontSize: 16,
+    fontSize: 15,
     marginRight: 8,
     backgroundColor: '#fff',
   },
   saveButton: {
     backgroundColor: '#10b981',
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
   },
   saveButtonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
   },
   priceContainer: {
-    marginRight: 8,
+    marginRight: 6,
   },
   priceInput: {
     borderWidth: 1,
     borderColor: '#d1d5db',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    fontSize: 14,
-    width: 70,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    fontSize: 13,
+    width: 60,
     textAlign: 'center',
     backgroundColor: '#f9fafb',
   },
   priceDisplay: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: '#059669',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
     backgroundColor: '#f0fdf4',
-    borderRadius: 6,
-    minWidth: 70,
+    borderRadius: 4,
+    minWidth: 60,
     textAlign: 'center',
   },
   checkbox: {
-    width: 24,
-    height: 24,
+    width: 22,
+    height: 22,
     borderWidth: 2,
     borderColor: '#d1d5db',
     borderRadius: 4,
@@ -1180,11 +978,11 @@ const styles = StyleSheet.create({
   },
   checkmark: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 'bold',
   },
   itemText: {
-    fontSize: 16,
+    fontSize: 15,
     color: '#1f2937',
     fontWeight: '500',
   },
@@ -1193,7 +991,7 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
   },
   itemMeta: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#6b7280',
     marginTop: 2,
   },
@@ -1203,48 +1001,73 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 2,
   },
-  categoryBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginLeft: 8,
-  },
-  categoryText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
   deleteButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#fee2e2',
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 10,
+    marginLeft: 8,
   },
   deleteButtonText: {
     color: '#ef4444',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
   },
   emptyText: {
     textAlign: 'center',
-    fontSize: 16,
+    fontSize: 15,
     color: '#9ca3af',
     marginTop: 40,
   },
   clearButton: {
     backgroundColor: '#ef4444',
-    margin: 20,
-    padding: 15,
+    margin: 16,
+    padding: 12,
     borderRadius: 8,
     alignItems: 'center',
   },
   clearButtonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
+  },
+  historyItem: {
+    backgroundColor: '#fff',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  historyHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  historyListName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1f2937',
+  },
+  historyTotal: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#059669',
+  },
+  historyDate: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginBottom: 3,
+  },
+  historyItemCount: {
+    fontSize: 13,
+    color: '#9ca3af',
   },
   totalSection: {
     backgroundColor: '#fff',
