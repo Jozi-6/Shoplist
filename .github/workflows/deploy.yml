@@ -31,7 +31,10 @@ jobs:
         run: npm ci
 
       - name: Build web
-        run: npm run build:web
+        run: |
+          export EXPO_PUBLIC_BASE_URL=/Shoplist/
+          export EXPO_PUBLIC_PUBLIC_URL=/Shoplist/
+          npm run build:web
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
