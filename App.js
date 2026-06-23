@@ -21,6 +21,8 @@ export default function App() {
   const [renameListName, setRenameListName] = useState('');
   const [currentView, setCurrentView] = useState('active'); // 'active' or 'history'
   const [history, setHistory] = useState([]);
+  const [historyDetailModalVisible, setHistoryDetailModalVisible] = useState(false);
+  const [selectedHistoryEntry, setSelectedHistoryEntry] = useState(null);
 
   // Load lists and history from AsyncStorage on mount
   useEffect(() => {
@@ -95,6 +97,11 @@ export default function App() {
       }, 0)
     };
     setHistory(prev => [historyEntry, ...prev]);
+  };
+
+  const openHistoryDetail = (entry) => {
+    setSelectedHistoryEntry(entry);
+    setHistoryDetailModalVisible(true);
   };
 
   const saveLists = async () => {
@@ -550,7 +557,11 @@ export default function App() {
             <Text style={styles.emptyText}>No history yet</Text>
           ) : (
             history.map(entry => (
-              <View key={entry.id} style={styles.historyItem}>
+              <TouchableOpacity
+                key={entry.id}
+                style={styles.historyItem}
+                onPress={() => openHistoryDetail(entry)}
+              >
                 <View style={styles.historyHeader}>
                   <Text style={styles.historyListName}>{entry.listName}</Text>
                   <Text style={styles.historyTotal}>Total: {entry.total.toFixed(2)}</Text>
@@ -559,7 +570,7 @@ export default function App() {
                   {new Date(entry.archivedAt).toLocaleDateString()} {new Date(entry.archivedAt).toLocaleTimeString()}
                 </Text>
                 <Text style={styles.historyItemCount}>{entry.items.length} items</Text>
-              </View>
+              </TouchableOpacity>
             ))
           )}
         </ScrollView>
@@ -692,6 +703,60 @@ export default function App() {
                 onPress={saveItemDetails}
               >
                 <Text style={styles.saveButtonText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* History Detail Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={historyDetailModalVisible}
+        onRequestClose={() => setHistoryDetailModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>{selectedHistoryEntry?.listName}</Text>
+            <Text style={styles.historyDetailDate}>
+              {selectedHistoryEntry && new Date(selectedHistoryEntry.archivedAt).toLocaleDateString()} {selectedHistoryEntry && new Date(selectedHistoryEntry.archivedAt).toLocaleTimeString()}
+            </Text>
+            <View style={styles.historyDetailTotal}>
+              <Text style={styles.historyDetailTotalLabel}>Total:</Text>
+              <Text style={styles.historyDetailTotalValue}>{selectedHistoryEntry?.total.toFixed(2)}</Text>
+            </View>
+            
+            <ScrollView style={styles.historyDetailItems}>
+              {selectedHistoryEntry?.items.map((item, index) => (
+                <View key={index} style={styles.historyDetailItem}>
+                  <View style={[styles.historyDetailCheckbox, item.completed && styles.historyDetailCheckboxChecked]}>
+                    {item.completed && <Text style={styles.historyDetailCheckmark}>✓</Text>}
+                  </View>
+                  <View style={styles.historyDetailItemText}>
+                    <Text style={[styles.historyDetailItemName, !item.completed && styles.historyDetailItemIncomplete]}>
+                      {item.text}
+                    </Text>
+                    {item.quantity && (
+                      <Text style={styles.historyDetailItemMeta}>Qty: {item.quantity}</Text>
+                    )}
+                    {item.price && (
+                      <Text style={styles.historyDetailItemMeta}>Price: {item.price}</Text>
+                    )}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.cancelButton]} 
+                onPress={() => {
+                  setHistoryDetailModalVisible(false);
+                  setSelectedHistoryEntry(null);
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Close</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1068,6 +1133,82 @@ const styles = StyleSheet.create({
   historyItemCount: {
     fontSize: 13,
     color: '#9ca3af',
+  },
+  historyDetailDate: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  historyDetailTotal: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f0fdf4',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  historyDetailTotalLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
+    marginRight: 8,
+  },
+  historyDetailTotalValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#059669',
+  },
+  historyDetailItems: {
+    maxHeight: 300,
+    marginBottom: 16,
+  },
+  historyDetailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#f9fafb',
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  historyDetailCheckbox: {
+    width: 20,
+    height: 20,
+    borderWidth: 2,
+    borderColor: '#d1d5db',
+    borderRadius: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  historyDetailCheckboxChecked: {
+    backgroundColor: '#10b981',
+    borderColor: '#10b981',
+  },
+  historyDetailCheckmark: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  historyDetailItemText: {
+    flex: 1,
+  },
+  historyDetailItemName: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#1f2937',
+  },
+  historyDetailItemIncomplete: {
+    color: '#ef4444',
+    fontStyle: 'italic',
+  },
+  historyDetailItemMeta: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginTop: 2,
   },
   totalSection: {
     backgroundColor: '#fff',
